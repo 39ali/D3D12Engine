@@ -159,8 +159,129 @@ ComPtr<ID3D12Device2> CreateDevice(ComPtr<IDXGIAdapter4> adapter){
 }
 
 
-//ComPtr<ID3D12CommandQueue
-// 
+ComPtr<ID3D12CommandQueue> 
+CreateCommandQueue(ComPtr<ID3D12Device2>device,D3D12_COMMAND_LIST_TYPE type){
+	ComPtr<ID3D12CommandQueue> commandQueue;
+	D3D12_COMMAND_QUEUE_DESC desc = {};
+	desc.Type = type;
+	desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+	desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	desc.NodeMask = 0;
+	ThrowIfFailed(device->CreateCommandQueue(&desc, IID_PPV_ARGS(&commandQueue)));
+	return commandQueue;
+}
+
+bool CheckTearing() {
+	BOOL allowTearing = TRUE;
+	ComPtr<IDXGIFactory4> factory4;
+	if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory4)))) 
+	{
+		ComPtr<IDXGIFactory5> factory5;
+		if (SUCCEEDED(factory4.As(&factory5)))
+		{
+			if (FAILED(factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING
+				, &allowTearing, sizeof(allowTearing)))) 
+			{
+				allowTearing = false;
+			}
+		}
+	}
+	return allowTearing;
+}
+
+
+ComPtr<IDXGISwapChain4> CreateSwapChain(HWND hwnd,
+	ComPtr<ID3D12CommandQueue> commandQueue,
+	uint32_t width, uint32_t height, uint32_t bufferCount) 
+{
+	ComPtr<IDXGISwapChain4> dxgiSwapChain4;
+	ComPtr<IDXGIFactory4> dxgiFactory4;
+	UINT factoryFlags = 0;
+#ifndef NDEBUG
+	factoryFlags
+		= DXGI_CREATE_FACTORY_DEBUG;
+#endif // !NDEBUG
+
+	ThrowIfFailed(CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&dxgiFactory4)));
+
+	DXGI_SWAP_CHAIN_DESC1 swapchainDesc = {};
+	swapchainDesc.Width = width;
+	swapchainDesc.Height = height;
+	swapchainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapchainDesc.Stereo = FALSE;
+	swapchainDesc.SampleDesc = {1,0};
+	swapchainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapchainDesc.BufferCount = bufferCount;
+	swapchainDesc.Scaling = DXGI_SCALING_STRETCH;
+	swapchainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	swapchainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+	swapchainDesc.Flags = CheckTearing() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+	ComPtr<IDXGISwapChain1> swapchain1;
+	ThrowIfFailed(dxgiFactory4->CreateSwapChainForHwnd(commandQueue.Get(),
+		hwnd, &swapchainDesc
+		, nullptr, nullptr, &swapchain1));
+
+	// disable the fullscreen Alt+enter
+	ThrowIfFailed(dxgiFactory4->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
+	ThrowIfFailed(swapchain1.As(&dxgiSwapChain4));
+	return dxgiSwapChain4;
+}
+
+ComPtr<ID3D12DescriptorHeap> CreateDescriptorHeap(ComPtr<ID3D12Device2> device,
+	D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t numDescriptors) 
+{
+	ComPtr<ID3D12DescriptorHeap> descriptorHeap;
+	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+	desc.Type = type;
+	desc.NumDescriptors = numDescriptors;
+
+	ThrowIfFailed(device->CreateDescriptorHeap(&desc,IID_PPV_ARGS(&descriptorHeap)));
+	return descriptorHeap;
+}
+
+void CreateRenderTargetViews(ComPtr<ID3D12Device2> device , ComPtr<IDXGISwapChain4> swapChain ,ComPtr<ID3D12DescriptorHeap> descriptorHeap )
+{
+	auto renderTargetViewDescSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvh(descriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	for (uint32_t i = 0; i < g_NumFrames; i++) 
+	{
+		ComPtr<ID3D12Resource>backBuffer;
+		ThrowIfFailed(swapChain->GetBuffer(i,IID_PPV_ARGS(&backBuffer)));
+		device->CreateRenderTargetView(backBuffer.Get(),nullptr,rtvh);
+		g_BackBuffers[i] = backBuffer;
+		rtvh.Offset(renderTargetViewDescSize);
+	}
+}
+
+ComPtr<ID3D12CommandAllocator> CreateCommandAllocator(ComPtr<ID3D12Device2> device,
+	D3D12_COMMAND_LIST_TYPE type) {
+	ComPtr<ID3D12CommandAllocator> commandAllocator;
+	ThrowIfFailed(device->CreateCommandAllocator(type, IID_PPV_ARGS(&commandAllocator)));
+	return commandAllocator;
+}
+
+
+ComPtr<ID3D12GraphicsCommandList> CreateCommandList(ComPtr<ID3D12Device2> device,
+	ComPtr<ID3D12CommandAllocator> commandAllocator,
+	D3D12_COMMAND_LIST_TYPE type) {
+
+	ComPtr<ID3D12GraphicsCommandList> commandList;
+	ThrowIfFailed(device->CreateCommandList(0,type, commandAllocator.Get(),
+		nullptr,IID_PPV_ARGS(&commandList)));
+	//Indicate that the commandList are now ready for use .
+	ThrowIfFailed(commandList->Close()); 
+
+	return commandList;
+}
+
+
+ComPtr<ID3D12Fence> CreateFence(ComPtr<ID3D12Device2> device) {
+	ComPtr<ID3D12Fence> fence;
+	ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+	return fence;
+}
+
+
 void main() {
   int n;
   std::cin >> n;
